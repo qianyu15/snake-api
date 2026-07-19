@@ -30,6 +30,7 @@ async function getContributions(username) {
       user(login: $login) {
         contributionsCollection {
           contributionCalendar {
+            totalContributions
             weeks {
               contributionDays {
                 contributionCount
@@ -59,6 +60,12 @@ async function getContributions(username) {
     })
   });
 
+  if (!response.ok) {
+    throw new Error(
+      `GitHub API returned ${response.status}`
+    );
+  }
+
   const data = await response.json();
 
   if (data.errors) {
@@ -83,7 +90,7 @@ async function getContributions(username) {
 function createGrid(calendar) {
   const grid = [];
 
-  for (let x = 0; x < 53; x++) {
+  calendar.weeks.forEach((week, x) => {
     grid[x] = [];
 
     for (let y = 0; y < 7; y++) {
@@ -94,10 +101,6 @@ function createGrid(calendar) {
         date: null
       };
     }
-  }
-
-  calendar.weeks.forEach((week, x) => {
-    if (x >= 53) return;
 
     week.contributionDays.forEach(day => {
       grid[x][day.weekday] = {
@@ -112,17 +115,46 @@ function createGrid(calendar) {
   return grid;
 }
 
+/**
+ * 蛇の移動経路を作る
+ *
+ * 左から右へ進みながら、
+ * 1列ごとに上下方向を反転させる。
+ *
+ * つまり:
+ *
+ * ↓ ↑ ↓ ↑ ↓
+ * ↓ ↑ ↓ ↑ ↓
+ * ↓ ↑ ↓ ↑ ↓
+ *
+ * ではなく、実際には
+ *
+ * ↓
+ * ↓
+ * ↓
+ * ↓
+ * ↓ →
+ * ↑
+ * ↑
+ * ↑
+ * ↑ →
+ * ↓
+ *
+ * のような連続した経路になる。
+ */
 function createSnakePath(grid) {
   const path = [];
 
   for (let x = 0; x < grid.length; x++) {
+    const column = grid[x];
+
     if (x % 2 === 0) {
-      for (let y = 0; y < 7; y++) {
-        path.push(grid[x][y]);
+      for (let y = 0; y < column.length; y++) {
+        path.push(column[y]);
       }
     } else {
-      for (let y = 6; y >= 0; y--) {
-        path.push(grid[x][y]);
+      for (let y = column.length - 1; y >= 0; y--) {
+        path.push(column[y]);
       }
     }
   }
@@ -130,24 +162,44 @@ function createSnakePath(grid) {
   return path;
 }
 
+function escapeXml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
 function createSvg(grid, snakePath) {
-  const cellSize = 12;
+  /*
+   * GitHubのContribution Gridに近いサイズ
+   */
+  const cellSize = 10;
   const gap = 3;
+  const step = cellSize + gap;
 
-  const width = 53 * (cellSize + gap);
-  const height = 7 * (cellSize + gap);
+  const columns = grid.length;
+  const rows = 7;
 
+  const width = columns * step;
+  const height = rows * step;
+
+  /*
+   * 1マスを描画
+   */
   const cells = grid
     .flat()
     .map(cell => {
-      const x = cell.x * (cellSize + gap);
-      const y = cell.y * (cellSize + gap);
+      const x = cell.x * step;
+      const y = cell.y * step;
 
       const color =
         COLORS[getLevel(cell.count)];
 
       return `
         <rect
+          class="cell cell-${cell.x}-${cell.y}"
           x="${x}"
           y="${y}"
           width="${cellSize}"
@@ -159,19 +211,69 @@ function createSvg(grid, snakePath) {
     })
     .join("");
 
-  const path = snakePath
+  /*
+   * 蛇が通るルート
+   *
+   * 本家っぽく、
+   * 1セルごとに「食べる」アニメーションをする。
+   */
+  const animations = snakePath
     .map((cell, index) => {
+      const selector =
+        `.cell-${cell.x}-${cell.y}`;
+
+      const delay =
+        index * 0.035;
+
+      return `
+        ${selector} {
+          animation:
+            eat-cell
+            0.18s
+            ease-out
+            ${delay}s
+            forwards;
+        }
+      `;
+    })
+    .join("");
+
+  /*
+   * 蛇の座標
+   */
+  const snakePoints = snakePath
+    .map(cell => {
       const x =
-        cell.x * (cellSize + gap) +
+        cell.x * step +
         cellSize / 2;
 
       const y =
-        cell.y * (cellSize + gap) +
+        cell.y * step +
         cellSize / 2;
 
-      return `${index === 0 ? "M" : "L"} ${x} ${y}`;
+      return {
+        x,
+        y
+      };
+    });
+
+  /*
+   * 蛇の移動用Path
+   */
+  const snakeD = snakePoints
+    .map((point, index) => {
+      return `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`;
     })
     .join(" ");
+
+  /*
+   * 速度
+   */
+  const duration =
+    Math.max(
+      8,
+      snakePath.length * 0.035
+    );
 
   return `
 <svg
@@ -179,23 +281,117 @@ function createSvg(grid, snakePath) {
   width="${width}"
   height="${height}"
   viewBox="0 0 ${width} ${height}"
+  role="img"
+  aria-label="GitHub contribution snake"
 >
   <style>
+    .cell {
+      transform-box: fill-box;
+      transform-origin: center;
+    }
+
+    /*
+     * 蛇が食べたセルを消す
+     */
+    @keyframes eat-cell {
+      0% {
+        opacity: 1;
+        transform: scale(1);
+      }
+
+      100% {
+        opacity: 0;
+        transform: scale(0.15);
+      }
+    }
+
+    /*
+     * 蛇本体
+     */
     .snake {
       fill: none;
       stroke: #ffffff;
-      stroke-width: 3;
+      stroke-width: 7;
       stroke-linecap: round;
       stroke-linejoin: round;
+
+      stroke-dasharray: 35 100000;
+      stroke-dashoffset: 35;
+
+      animation:
+        snake-move
+        ${duration}s
+        linear
+        infinite;
+    }
+
+    /*
+     * 蛇の頭
+     */
+    .snake-head {
+      fill: #ffffff;
+
+      animation:
+        snake-head-move
+        ${duration}s
+        linear
+        infinite;
+    }
+
+    @keyframes snake-move {
+      0% {
+        stroke-dashoffset: 35;
+      }
+
+      100% {
+        stroke-dashoffset: -${snakePath.length * 15};
+      }
+    }
+
+    /*
+     * 蛇の頭を動かすためのアニメーション
+     *
+     * motion-pathを使うため、
+     * 最新ブラウザでは自然な動きになる。
+     */
+    @keyframes snake-head-move {
+      0% {
+        offset-distance: 0%;
+      }
+
+      100% {
+        offset-distance: 100%;
+      }
     }
   </style>
 
+  <!-- Contribution Grid -->
   ${cells}
 
+  <!-- 蛇の移動パス -->
+  <path
+    id="snake-path"
+    d="${escapeXml(snakeD)}"
+    fill="none"
+    stroke="none"
+  />
+
+  <!-- 蛇本体 -->
   <path
     class="snake"
-    d="${path}"
+    d="${escapeXml(snakeD)}"
   />
+
+  <!-- 蛇の頭 -->
+  <circle
+    class="snake-head"
+    r="5"
+    style="
+      offset-path: path('${escapeXml(snakeD)}');
+      offset-rotate: auto;
+    "
+  />
+
 </svg>
 `.trim();
 }
@@ -204,7 +400,9 @@ export default async function handler(req, res) {
   const { user } = req.query;
 
   if (!user || typeof user !== "string") {
-    return res.status(400).send("Missing user");
+    return res
+      .status(400)
+      .send("Missing user");
   }
 
   try {
@@ -218,7 +416,10 @@ export default async function handler(req, res) {
       createSnakePath(grid);
 
     const svg =
-      createSvg(grid, snakePath);
+      createSvg(
+        grid,
+        snakePath
+      );
 
     res.setHeader(
       "Content-Type",
@@ -227,7 +428,11 @@ export default async function handler(req, res) {
 
     res.setHeader(
       "Cache-Control",
-      "public, s-maxage=86400, stale-while-revalidate=604800"
+      [
+        "public",
+        "s-maxage=86400",
+        "stale-while-revalidate=604800"
+      ].join(", ")
     );
 
     return res
@@ -242,6 +447,8 @@ export default async function handler(req, res) {
 
     return res
       .status(500)
-      .send("Snake generation failed");
+      .send(
+        "Snake generation failed"
+      );
   }
 }
