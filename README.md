@@ -185,4 +185,3 @@ A snake doing its job.
 ## 📄 License
 
 MIT
-
