@@ -46,12 +46,10 @@ async function getContributions(username) {
 
   const response = await fetch(GITHUB_API, {
     method: "POST",
-
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`
     },
-
     body: JSON.stringify({
       query,
       variables: {
@@ -115,19 +113,8 @@ function createGrid(calendar) {
   return grid;
 }
 
-/**
+/*
  * 蛇の移動経路を作る
- *
- * 左から右へ進みながら、
- * 1列ごとに上下方向を反転させる。
- *
- * つまり:
- *
- * ↓ ↑ ↓ ↑ ↓
- * ↓ ↑ ↓ ↑ ↓
- * ↓ ↑ ↓ ↑ ↓
- *
- * ではなく、実際には
  *
  * ↓
  * ↓
@@ -140,7 +127,7 @@ function createGrid(calendar) {
  * ↑ →
  * ↓
  *
- * のような連続した経路になる。
+ * のような蛇行経路。
  */
 function createSnakePath(grid) {
   const path = [];
@@ -172,9 +159,6 @@ function escapeXml(value) {
 }
 
 function createSvg(grid, snakePath) {
-  /*
-   * GitHubのContribution Gridに近いサイズ
-   */
   const cellSize = 10;
   const gap = 3;
   const step = cellSize + gap;
@@ -186,7 +170,17 @@ function createSvg(grid, snakePath) {
   const height = rows * step;
 
   /*
-   * 1マスを描画
+   * 蛇の長さ
+   */
+  const SNAKE_LENGTH = 8;
+
+  /*
+   * 1セル移動する時間
+   */
+  const STEP_TIME = 40;
+
+  /*
+   * Contribution Grid
    */
   const cells = grid
     .flat()
@@ -212,69 +206,39 @@ function createSvg(grid, snakePath) {
     .join("");
 
   /*
-   * 蛇が通るルート
+   * 蛇が通る全座標
    *
-   * 本家っぽく、
-   * 1セルごとに「食べる」アニメーションをする。
+   * SVG上の座標に変換する。
    */
-  const animations = snakePath
-    .map((cell, index) => {
-      const selector =
-        `.cell-${cell.x}-${cell.y}`;
-
-      const delay =
-        index * 0.035;
-
-      return `
-        ${selector} {
-          animation:
-            eat-cell
-            0.18s
-            ease-out
-            ${delay}s
-            forwards;
-        }
-      `;
-    })
-    .join("");
+  const points = snakePath.map(cell => ({
+    x: cell.x * step + cellSize / 2,
+    y: cell.y * step + cellSize / 2
+  }));
 
   /*
-   * 蛇の座標
+   * JavaScriptに渡すための座標データ
    */
-  const snakePoints = snakePath
-    .map(cell => {
-      const x =
-        cell.x * step +
-        cellSize / 2;
-
-      const y =
-        cell.y * step +
-        cellSize / 2;
-
-      return {
-        x,
-        y
-      };
-    });
+  const serializedPoints =
+    JSON.stringify(points);
 
   /*
-   * 蛇の移動用Path
+   * 蛇の頭と胴体
    */
-  const snakeD = snakePoints
-    .map((point, index) => {
-      return `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`;
-    })
-    .join(" ");
+  const snakeParts = Array.from(
+    {
+      length: SNAKE_LENGTH
+    },
+    (_, index) => `
+      <circle
+        class="snake-part snake-part-${index}"
+        r="${index === 0 ? 5 : 4}"
+      />
+    `
+  ).join("");
 
   /*
-   * 速度
+   * セルを食べるアニメーション
    */
-  const duration =
-    Math.max(
-      8,
-      snakePath.length * 0.035
-    );
-
   return `
 <svg
   xmlns="http://www.w3.org/2000/svg"
@@ -290,9 +254,23 @@ function createSvg(grid, snakePath) {
       transform-origin: center;
     }
 
-    /*
-     * 蛇が食べたセルを消す
-     */
+    .snake-part {
+      fill: #ffffff;
+      pointer-events: none;
+    }
+
+    .snake-part-0 {
+      fill: #ffffff;
+    }
+
+    .eaten {
+      animation:
+        eat-cell
+        0.2s
+        ease-out
+        forwards;
+    }
+
     @keyframes eat-cell {
       0% {
         opacity: 1;
@@ -304,93 +282,340 @@ function createSvg(grid, snakePath) {
         transform: scale(0.15);
       }
     }
-
-    /*
-     * 蛇本体
-     */
-    .snake {
-      fill: none;
-      stroke: #ffffff;
-      stroke-width: 7;
-      stroke-linecap: round;
-      stroke-linejoin: round;
-
-      stroke-dasharray: 35 100000;
-      stroke-dashoffset: 35;
-
-      animation:
-        snake-move
-        ${duration}s
-        linear
-        infinite;
-    }
-
-    /*
-     * 蛇の頭
-     */
-    .snake-head {
-      fill: #ffffff;
-
-      animation:
-        snake-head-move
-        ${duration}s
-        linear
-        infinite;
-    }
-
-    @keyframes snake-move {
-      0% {
-        stroke-dashoffset: 35;
-      }
-
-      100% {
-        stroke-dashoffset: -${snakePath.length * 15};
-      }
-    }
-
-    /*
-     * 蛇の頭を動かすためのアニメーション
-     *
-     * motion-pathを使うため、
-     * 最新ブラウザでは自然な動きになる。
-     */
-    @keyframes snake-head-move {
-      0% {
-        offset-distance: 0%;
-      }
-
-      100% {
-        offset-distance: 100%;
-      }
-    }
   </style>
 
   <!-- Contribution Grid -->
   ${cells}
 
-  <!-- 蛇の移動パス -->
-  <path
-    id="snake-path"
-    d="${escapeXml(snakeD)}"
-    fill="none"
-    stroke="none"
-  />
+  <!-- Snake -->
+  <g id="snake">
+    ${snakeParts}
+  </g>
 
-  <!-- 蛇本体 -->
-  <path
-    class="snake"
-    d="${escapeXml(snakeD)}"
-  />
+  <script>
+    <![CDATA[
 
-  <!-- 蛇の頭 -->
-  <circle
-    class="snake-head"
-    r="5"
-    style="
-      offset-path: path('${escapeXml(snakeD)}');
-      offset-rotate: auto;
-    "
-  />
+    /*
+     * 蛇の経路
+     */
+    const path =
+      ${serializedPoints};
+
+    /*
+     * 蛇の長さ
+     */
+    const SNAKE_LENGTH =
+      ${SNAKE_LENGTH};
+
+    /*
+     * 1セルの移動時間
+     */
+    const STEP_TIME =
+      ${STEP_TIME};
+
+    /*
+     * 蛇のパーツ
+     */
+    const parts =
+      Array.from(
+        document.querySelectorAll(
+          ".snake-part"
+        )
+      );
+
+    /*
+     * 元のセル座標
+     *
+     * 蛇が食べるセルを
+     * JavaScriptから検索するために使う。
+     */
+    const cells = ${JSON.stringify(
+      snakePath.map(cell => ({
+        x: cell.x,
+        y: cell.y
+      }))
+    )};
+
+    /*
+     * 1:
+     *   左から右へ進む
+     *
+     * -1:
+     *   右から左へ戻る
+     */
+    let direction = 1;
+
+    /*
+     * 蛇の頭の位置
+     */
+    let headIndex = 0;
+
+    /*
+     * アニメーション開始時間
+     */
+    let startTime = null;
+
+    /*
+     * 現在の蛇の位置にあるセルを食べる
+     */
+    function eatCell(index) {
+      const cell = cells[index];
+
+      if (!cell) {
+        return;
+      }
+
+      const selector =
+        ".cell-" +
+        cell.x +
+        "-" +
+        cell.y;
+
+      const element =
+        document.querySelector(selector);
+
+      if (!element) {
+        return;
+      }
+
+      if (
+        element.classList.contains(
+          "eaten"
+        )
+      ) {
+        return;
+      }
+
+      element.classList.add(
+        "eaten"
+      );
+    }
+
+    /*
+     * 蛇の位置を更新する
+     */
+    function updateSnake(currentIndex) {
+      parts.forEach(
+        (part, index) => {
+          /*
+           * 頭から後ろに行くほど
+           * 過去の位置を使う。
+           */
+          const position =
+            currentIndex -
+            index * direction;
+
+          /*
+           * 経路外
+           */
+          if (
+            position < 0 ||
+            position >= path.length
+          ) {
+            part.style.display =
+              "none";
+
+            return;
+          }
+
+          part.style.display =
+            "block";
+
+          /*
+           * 現在位置の前後の点
+           */
+          const fromIndex =
+            Math.floor(position);
+
+          const toIndex =
+            Math.min(
+              Math.ceil(position),
+              path.length - 1
+            );
+
+          const from =
+            path[fromIndex];
+
+          const to =
+            path[toIndex];
+
+          /*
+           * セル間の移動割合
+           */
+          const ratio =
+            position - fromIndex;
+
+          /*
+           * 線形補間
+           */
+          const x =
+            from.x +
+            (to.x - from.x) *
+            ratio;
+
+          const y =
+            from.y +
+            (to.y - from.y) *
+            ratio;
+
+          part.setAttribute(
+            "cx",
+            x
+          );
+
+          part.setAttribute(
+            "cy",
+            y
+          );
+        }
+      );
+    }
+
+    /*
+     * すべてのセルを復活
+     */
+    function resetCells() {
+      document
+        .querySelectorAll(".cell")
+        .forEach(cell => {
+          cell.classList.remove(
+            "eaten"
+          );
+        });
+    }
+
+    /*
+     * メインアニメーション
+     */
+    function animate(timestamp) {
+      if (!startTime) {
+        startTime =
+          timestamp;
+      }
+
+      /*
+       * 経過時間
+       */
+      const elapsed =
+        timestamp -
+        startTime;
+
+      /*
+       * 現在の蛇の位置
+       *
+       * 0.0
+       * 0.5
+       * 1.0
+       * 1.5
+       *
+       * のように小数で進む。
+       */
+      const progress =
+        elapsed /
+        STEP_TIME;
+
+      const currentIndex =
+        headIndex +
+        progress *
+        direction;
+
+      /*
+       * 頭が通過したセルを食べる
+       */
+      const eatenIndex =
+        Math.floor(
+          currentIndex
+        );
+
+      if (
+        eatenIndex >= 0 &&
+        eatenIndex < path.length
+      ) {
+        eatCell(
+          eatenIndex
+        );
+      }
+
+      /*
+       * 蛇を移動
+       */
+      updateSnake(
+        currentIndex
+      );
+
+      /*
+       * 順方向の終端
+       */
+      if (
+        direction === 1 &&
+        currentIndex >=
+          path.length - 1
+      ) {
+        headIndex =
+          path.length - 1;
+
+        direction =
+          -1;
+
+        startTime =
+          timestamp;
+
+        requestAnimationFrame(
+          animate
+        );
+
+        return;
+      }
+
+      /*
+       * 逆方向の終端
+       */
+      if (
+        direction === -1 &&
+        currentIndex <= 0
+      ) {
+        headIndex = 0;
+
+        direction = 1;
+
+        startTime =
+          timestamp;
+
+        /*
+         * 一周したので
+         * セルを復活
+         */
+        resetCells();
+
+        requestAnimationFrame(
+          animate
+        );
+
+        return;
+      }
+
+      /*
+       * 次のフレーム
+       */
+      requestAnimationFrame(
+        animate
+      );
+    }
+
+    /*
+     * 初期位置
+     */
+    updateSnake(0);
+
+    /*
+     * 開始
+     */
+    requestAnimationFrame(
+      animate
+    );
+
+    ]]>
+  </script>
 
 </svg>
 `.trim();
@@ -399,7 +624,10 @@ function createSvg(grid, snakePath) {
 export default async function handler(req, res) {
   const { user } = req.query;
 
-  if (!user || typeof user !== "string") {
+  if (
+    !user ||
+    typeof user !== "string"
+  ) {
     return res
       .status(400)
       .send("Missing user");
