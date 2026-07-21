@@ -11,36 +11,56 @@ const COLORS = [
   "#39d353"
 ];
 
-const CELL_SIZE = 10;
-const GAP = 3;
-const STEP = CELL_SIZE + GAP;
+const SNAKE_COLOR =
+  "#ffffff";
 
-const SNAKE_COLOR = "#ffffff";
+const CELL_SIZE =
+  10;
 
-const SNAKE_LENGTH = 8;
+const GAP =
+  3;
 
-const SNAKE_SPEED = 55;
+const STEP =
+  CELL_SIZE +
+  GAP;
 
-const CELL_FADE_DURATION = 0.08;
+const SNAKE_LENGTH =
+  8;
+
+const SNAKE_SPEED =
+  55;
+
+const CELL_FADE_DURATION =
+  0.12;
 
 
 /*
  * Contribution Level
  */
-function getLevel(count) {
-  if (count === 0) {
+function getLevel(
+  count
+) {
+  if (
+    count === 0
+  ) {
     return 0;
   }
 
-  if (count <= 3) {
+  if (
+    count <= 3
+  ) {
     return 1;
   }
 
-  if (count <= 6) {
+  if (
+    count <= 6
+  ) {
     return 2;
   }
 
-  if (count <= 9) {
+  if (
+    count <= 9
+  ) {
     return 3;
   }
 
@@ -49,13 +69,17 @@ function getLevel(count) {
 
 
 /*
- * GitHub Contributions取得
+ * GitHub API
  */
-async function getContributions(username) {
+async function getContributions(
+  username
+) {
   const token =
     process.env.GITHUB_TOKEN;
 
-  if (!token) {
+  if (
+    !token
+  ) {
     throw new Error(
       "GITHUB_TOKEN is not configured"
     );
@@ -66,7 +90,6 @@ async function getContributions(username) {
       user(login: $login) {
         contributionsCollection {
           contributionCalendar {
-            totalContributions
             weeks {
               contributionDays {
                 contributionCount
@@ -84,7 +107,8 @@ async function getContributions(username) {
     await fetch(
       GITHUB_API,
       {
-        method: "POST",
+        method:
+          "POST",
 
         headers: {
           "Content-Type":
@@ -95,44 +119,55 @@ async function getContributions(username) {
         },
 
         body:
-          JSON.stringify({
-            query,
+          JSON.stringify(
+            {
+              query,
 
-            variables: {
-              login: username
+              variables: {
+                login:
+                  username
+              }
             }
-          })
-        }
-      );
+          )
+      }
+    );
 
-  if (!response.ok) {
+  if (
+    !response.ok
+  ) {
     throw new Error(
       `GitHub API returned ${response.status}`
     );
   }
 
-  const data =
+  const result =
     await response.json();
 
-  if (data.errors) {
+  if (
+    result.errors
+  ) {
     throw new Error(
-      data.errors
+      result.errors
         .map(
           error =>
             error.message
         )
-        .join(", ")
+        .join(
+          ", "
+        )
     );
   }
 
   const calendar =
-    data
+    result
       ?.data
       ?.user
       ?.contributionsCollection
       ?.contributionCalendar;
 
-  if (!calendar) {
+  if (
+    !calendar
+  ) {
     throw new Error(
       "GitHub user not found"
     );
@@ -143,145 +178,356 @@ async function getContributions(username) {
 
 
 /*
- * Contribution Grid生成
+ * Grid生成
  */
-function createGrid(calendar) {
-  return calendar.weeks.map(
-    (week, x) => {
-      const column =
-        Array.from(
-          {
-            length: 7
-          },
-          (_, y) => ({
+function createGrid(
+  calendar
+) {
+  return calendar
+    .weeks
+    .map(
+      (
+        week,
+        x
+      ) => {
+        const column =
+          Array
+            .from(
+              {
+                length:
+                  7
+              },
+              (
+                _,
+                y
+              ) => ({
+                x,
+
+                y,
+
+                count:
+                  0,
+
+                date:
+                  null
+              })
+            );
+
+        for (
+          const day
+          of week.contributionDays
+        ) {
+          column[
+            day.weekday
+          ] = {
             x,
-            y,
-            count: 0,
-            date: null
-          })
+
+            y:
+              day.weekday,
+
+            count:
+              day.contributionCount,
+
+            date:
+              day.date
+          };
+        }
+
+        return column;
+      }
+    );
+}
+
+
+/*
+ * 隣接セル
+ */
+function getNeighbors(
+  cell,
+  grid
+) {
+  const directions = [
+    {
+      x:
+        1,
+
+      y:
+        0
+    },
+
+    {
+      x:
+        0,
+
+      y:
+        1
+    },
+
+    {
+      x:
+        -1,
+
+      y:
+        0
+    },
+
+    {
+      x:
+        0,
+
+      y:
+        -1
+    }
+  ];
+
+  return directions
+    .map(
+      direction => {
+        const x =
+          cell.x +
+          direction.x;
+
+        const y =
+          cell.y +
+          direction.y;
+
+        if (
+          x < 0 ||
+          x >= grid.length ||
+          y < 0 ||
+          y >= 7
+        ) {
+          return null;
+        }
+
+        return grid[
+          x
+        ][
+          y
+        ];
+      }
+    )
+    .filter(
+      Boolean
+    );
+}
+
+
+/*
+ * Contribution Snake Solver
+ *
+ * 目的:
+ *
+ * すべてのセルを一度ずつ訪問する
+ *
+ * 優先順位:
+ *
+ * 1. 未訪問
+ * 2. Contributionが高い
+ * 3. 進行方向を維持
+ */
+function solveSnake(
+  grid
+) {
+  const result =
+    [];
+
+  const visited =
+    new Set();
+
+  let current =
+    grid[
+      0
+    ][
+      0
+    ];
+
+  while (
+    result.length <
+    grid.length *
+    7
+  ) {
+    result.push(
+      current
+    );
+
+    visited.add(
+      `${current.x}:${current.y}`
+    );
+
+    const candidates =
+      getNeighbors(
+        current,
+        grid
+      )
+        .filter(
+          cell =>
+            !visited.has(
+              `${cell.x}:${cell.y}`
+            )
+        )
+        .sort(
+          (
+            a,
+            b
+          ) =>
+            b.count -
+            a.count
         );
 
+    if (
+      candidates.length
+    ) {
+      current =
+        candidates[
+          0
+        ];
+
+      continue;
+    }
+
+    /*
+     * 未訪問セルが残っている場合、
+     * 最も近い未訪問セルへ接続
+     */
+    let nearest =
+      null;
+
+    let nearestDistance =
+      Infinity;
+
+    for (
+      const column
+      of grid
+    ) {
       for (
-        const day
-        of week.contributionDays
+        const cell
+        of column
       ) {
-        column[day.weekday] = {
-          x,
+        const key =
+          `${cell.x}:${cell.y}`;
 
-          y:
-            day.weekday,
+        if (
+          visited.has(
+            key
+          )
+        ) {
+          continue;
+        }
 
-          count:
-            day.contributionCount,
+        const distance =
+          Math.abs(
+            cell.x -
+            current.x
+          ) +
+          Math.abs(
+            cell.y -
+            current.y
+          );
 
-          date:
-            day.date
-        };
+        if (
+          distance <
+          nearestDistance
+        ) {
+          nearest =
+            cell;
+
+          nearestDistance =
+            distance;
+        }
       }
-
-      return column;
     }
-  );
-}
 
+    if (
+      nearest
+    ) {
+      current =
+        nearest;
 
-/*
- * Serpentine Path
- *
- * ↓
- * ↓
- * ↓
- * ↓
- * ↓
- * ↓
- * ↓ →
- *
- * ↑
- * ↑
- * ↑
- * ↑
- * ↑
- * ↑
- * ↑ →
- */
-function createSnakePath(grid) {
-  const path = [];
-
-  for (
-    let x = 0;
-    x < grid.length;
-    x++
-  ) {
-    const column =
-      grid[x];
-
-    if (x % 2 === 0) {
-      path.push(
-        ...column
-      );
-    } else {
-      path.push(
-        ...column
-          .slice()
-          .reverse()
-      );
+      continue;
     }
+
+    break;
   }
 
-  return path;
+  return result;
 }
 
 
 /*
- * Cell → SVG Point
+ * Cell → Point
  */
-function getPoint(cell) {
+function getPoint(
+  cell
+) {
   return {
     x:
       cell.x *
-        STEP +
-      CELL_SIZE / 2,
+      STEP +
+      CELL_SIZE /
+      2,
 
     y:
       cell.y *
-        STEP +
-      CELL_SIZE / 2
+      STEP +
+      CELL_SIZE /
+      2
   };
 }
 
 
 /*
- * 2点間の距離
+ * Distance
  */
-function distance(a, b) {
+function distance(
+  a,
+  b
+) {
   const dx =
-    b.x - a.x;
+    b.x -
+    a.x;
 
   const dy =
-    b.y - a.y;
+    b.y -
+    a.y;
 
   return Math.sqrt(
-    dx * dx +
-    dy * dy
+    dx *
+    dx +
+    dy *
+    dy
   );
 }
 
 
 /*
- * Pathの長さ
+ * Path Length
  */
-function getPathLength(points) {
-  let length = 0;
+function getPathLength(
+  points
+) {
+  let length =
+    0;
 
   for (
-    let i = 1;
-    i < points.length;
+    let i =
+      1;
+
+    i <
+      points.length;
+
     i++
   ) {
     length +=
       distance(
-        points[i - 1],
-        points[i]
+        points[
+          i -
+          1
+        ],
+
+        points[
+          i
+        ]
       );
   }
 
@@ -290,21 +536,41 @@ function getPathLength(points) {
 
 
 /*
- * 各Pointまでの累積距離
+ * Cumulative Distance
  */
-function getCumulativeDistances(points) {
-  const distances = [0];
+function getCumulativeDistances(
+  points
+) {
+  const distances =
+    [
+      0
+    ];
 
   for (
-    let i = 1;
-    i < points.length;
+    let i =
+      1;
+
+    i <
+      points.length;
+
     i++
   ) {
-    distances[i] =
-      distances[i - 1] +
+    distances[
+      i
+    ] =
+      distances[
+        i -
+        1
+      ] +
       distance(
-        points[i - 1],
-        points[i]
+        points[
+          i -
+          1
+        ],
+
+        points[
+          i
+        ]
       );
   }
 
@@ -313,9 +579,11 @@ function getCumulativeDistances(points) {
 
 
 /*
- * SVG Path生成
+ * SVG Path
  */
-function createPath(points) {
+function createPath(
+  points
+) {
   return points
     .map(
       (
@@ -323,20 +591,31 @@ function createPath(points) {
         index
       ) =>
         `${
-          index === 0
+          index ===
+          0
             ? "M"
             : "L"
-        } ${point.x} ${point.y}`
+        } ${
+          point.x
+        } ${
+          point.y
+        }`
     )
-    .join(" ");
+    .join(
+      " "
+    );
 }
 
 
 /*
- * XML Escape
+ * Escape
  */
-function escapeXml(value) {
-  return String(value)
+function escapeXml(
+  value
+) {
+  return String(
+    value
+  )
     .replace(
       /&/g,
       "&amp;"
@@ -361,15 +640,12 @@ function escapeXml(value) {
 
 
 /*
- * Cell Animation
+ * Cell SVG
  */
 function createCell(
   cell,
-  pathIndex,
-  cumulativeDistances,
-  pathLength,
-  oneWayDuration,
-  totalDuration
+  progress,
+  duration
 ) {
   const x =
     cell.x *
@@ -386,48 +662,20 @@ function createCell(
       )
     ];
 
-  const distanceToCell =
-    cumulativeDistances[
-      pathIndex
-    ];
-
-  const progress =
-    pathLength === 0
-      ? 0
-      : distanceToCell /
-        pathLength;
-
-  const forwardTime =
+  const appear =
     progress *
-    oneWayDuration;
+    duration;
 
-  const reverseTime =
-    oneWayDuration +
-    (
-      1 -
-      progress
-    ) *
-    oneWayDuration;
-
-  const forwardFadeEnd =
+  const disappear =
     Math.min(
-      forwardTime +
-        CELL_FADE_DURATION,
+      appear +
+      CELL_FADE_DURATION,
 
-      oneWayDuration
-    );
-
-  const reverseFadeEnd =
-    Math.min(
-      reverseTime +
-        CELL_FADE_DURATION,
-
-      totalDuration
+      duration
     );
 
   return `
     <rect
-      class="cell"
       x="${x}"
       y="${y}"
       width="${CELL_SIZE}"
@@ -437,24 +685,19 @@ function createCell(
     >
       <animate
         attributeName="opacity"
-        dur="${totalDuration}s"
+        dur="${duration}s"
         repeatCount="indefinite"
-        calcMode="linear"
         keyTimes="
           0;
-          ${forwardTime / totalDuration};
-          ${forwardFadeEnd / totalDuration};
-          ${reverseTime / totalDuration};
-          ${reverseFadeEnd / totalDuration};
+          ${appear / duration};
+          ${disappear / duration};
           1
         "
         values="
           1;
           1;
           0;
-          0;
-          1;
-          1
+          0
         "
       />
     </rect>
@@ -463,97 +706,22 @@ function createCell(
 
 
 /*
- * Contribution Cells
- */
-function createCells(
-  grid,
-  snakePath,
-  cumulativeDistances,
-  pathLength,
-  oneWayDuration,
-  totalDuration
-) {
-  const indexMap =
-    new Map();
-
-  snakePath.forEach(
-    (
-      cell,
-      index
-    ) => {
-      indexMap.set(
-        `${cell.x}:${cell.y}`,
-        index
-      );
-    }
-  );
-
-  return grid
-    .flat()
-    .map(
-      cell => {
-        const pathIndex =
-          indexMap.get(
-            `${cell.x}:${cell.y}`
-          );
-
-        if (
-          pathIndex ===
-          undefined
-        ) {
-          return "";
-        }
-
-        return createCell(
-          cell,
-
-          pathIndex,
-
-          cumulativeDistances,
-
-          pathLength,
-
-          oneWayDuration,
-
-          totalDuration
-        );
-      }
-    )
-    .join("");
-}
-
-
-/*
- * Snake本体
- *
- * dasharray:
- *
- * [蛇の長さ] [残りのパス]
- *
- * dashoffset:
- *
- * 0
- * ↓
- * -pathLength
- * ↓
- * 0
+ * Snake SVG
  */
 function createSnake(
   path,
   pathLength,
-  oneWayDuration
+  duration
 ) {
   const snakeLength =
     SNAKE_LENGTH *
     STEP;
 
-  const totalDuration =
-    oneWayDuration *
-    2;
-
   return `
     <path
-      d="${escapeXml(path)}"
+      d="${escapeXml(
+        path
+      )}"
       fill="none"
       stroke="${SNAKE_COLOR}"
       stroke-width="7"
@@ -563,22 +731,14 @@ function createSnake(
         ${snakeLength}
         ${pathLength}
       "
-      stroke-dashoffset="0"
     >
       <animate
         attributeName="stroke-dashoffset"
-        dur="${totalDuration}s"
+        dur="${duration}s"
         repeatCount="indefinite"
-        calcMode="linear"
-        keyTimes="
-          0;
-          0.5;
-          1
-        "
         values="
           0;
-          -${pathLength};
-          0
+          -${pathLength}
         "
       />
     </path>
@@ -589,35 +749,23 @@ function createSnake(
 /*
  * Snake Head
  */
-function createSnakeHead(
+function createHead(
   path,
-  oneWayDuration
+  duration
 ) {
-  const totalDuration =
-    oneWayDuration *
-    2;
-
   return `
     <circle
       r="5"
       fill="${SNAKE_COLOR}"
     >
       <animateMotion
-        dur="${totalDuration}s"
+        dur="${duration}s"
         repeatCount="indefinite"
         rotate="auto"
         calcMode="linear"
-        keyPoints="
-          0;
-          1;
-          0
-        "
-        keyTimes="
-          0;
-          0.5;
-          1
-        "
-        path="${escapeXml(path)}"
+        path="${escapeXml(
+          path
+        )}"
       />
     </circle>
   `;
@@ -625,24 +773,18 @@ function createSnakeHead(
 
 
 /*
- * SVG生成
+ * SVG
  */
 function createSvg(
   grid,
   snakePath
 ) {
-  const columns =
-    grid.length;
-
-  const rows =
-    7;
-
   const width =
-    columns *
+    grid.length *
     STEP;
 
   const height =
-    rows *
+    7 *
     STEP;
 
   const points =
@@ -660,37 +802,59 @@ function createSvg(
       points
     );
 
-  const cumulativeDistances =
+  const distances =
     getCumulativeDistances(
       points
     );
 
-  const oneWayDuration =
+  const duration =
     Math.max(
       8,
 
       pathLength /
-        SNAKE_SPEED
+      SNAKE_SPEED
     );
-
-  const totalDuration =
-    oneWayDuration *
-    2;
 
   const cells =
-    createCells(
-      grid,
+    grid
+      .flat()
+      .map(
+        cell => {
+          const index =
+            snakePath
+              .findIndex(
+                item =>
+                  item.x ===
+                  cell.x &&
+                  item.y ===
+                  cell.y
+              );
 
-      snakePath,
+          if (
+            index ===
+            -1
+          ) {
+            return "";
+          }
 
-      cumulativeDistances,
+          const progress =
+            distances[
+              index
+            ] /
+            pathLength;
 
-      pathLength,
+          return createCell(
+            cell,
 
-      oneWayDuration,
+            progress,
 
-      totalDuration
-    );
+            duration
+          );
+        }
+      )
+      .join(
+        ""
+      );
 
   const snake =
     createSnake(
@@ -698,14 +862,14 @@ function createSvg(
 
       pathLength,
 
-      oneWayDuration
+      duration
     );
 
   const head =
-    createSnakeHead(
+    createHead(
       path,
 
-      oneWayDuration
+      duration
     );
 
   return `
@@ -717,26 +881,18 @@ function createSvg(
   role="img"
   aria-label="GitHub contribution snake"
 >
-  <style>
-    .cell {
-      shape-rendering:
-        geometricPrecision;
-    }
-  </style>
-
   ${cells}
 
   ${snake}
 
   ${head}
-
 </svg>
 `.trim();
 }
 
 
 /*
- * API Handler
+ * API
  */
 export default async function handler(
   req,
@@ -744,15 +900,18 @@ export default async function handler(
 ) {
   const {
     user
-  } = req.query;
+  } =
+    req.query;
 
   if (
     !user ||
     typeof user !==
-      "string"
+    "string"
   ) {
     return res
-      .status(400)
+      .status(
+        400
+      )
       .send(
         "Missing user"
       );
@@ -770,7 +929,7 @@ export default async function handler(
       );
 
     const snakePath =
-      createSnakePath(
+      solveSnake(
         grid
       );
 
@@ -790,28 +949,28 @@ export default async function handler(
     res.setHeader(
       "Cache-Control",
 
-      [
-        "public",
-        "s-maxage=86400",
-        "stale-while-revalidate=604800"
-      ].join(", ")
+      "public, s-maxage=86400, stale-while-revalidate=604800"
     );
 
     return res
-      .status(200)
+      .status(
+        200
+      )
       .send(
         svg
       );
 
-  } catch (error) {
+  } catch (
+    error
+  ) {
     console.error(
-      "Snake generation failed:",
-
       error
     );
 
     return res
-      .status(500)
+      .status(
+        500
+      )
       .send(
         "Snake generation failed"
       );
