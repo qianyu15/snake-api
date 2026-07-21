@@ -586,144 +586,82 @@ function createCells(
  */
 function createSnake(
   path,
-  reversePath,
   pathLength,
   oneWayDuration
 ) {
   const snakeLength =
-    SNAKE_LENGTH *
-    STEP;
+    SNAKE_LENGTH * STEP;
+
+  const totalDuration =
+    oneWayDuration * 2;
 
   /*
-   * 蛇が1回のアニメーションで
-   * 進むべきdashの周期。
+   * 蛇本体
    *
-   * snakeLength:
-   * 表示される蛇の長さ
+   * 1本だけ。
    *
-   * pathLength:
-   * 非表示部分
+   * 前進:
+   * 0 → -pathLength
+   *
+   * 後退:
+   * -pathLength → 0
    */
-  const dashArray =
-    `${snakeLength} ${pathLength}`;
-
-  /*
-   * 往路
-   */
-  const forwardSnake = `
+  const snake = `
     <path
-      id="snake-forward"
-      d="${escapeAttribute(
-        path
-      )}"
+      d="${escapeAttribute(path)}"
       fill="none"
       stroke="${SNAKE_COLOR}"
       stroke-width="7"
       stroke-linecap="round"
       stroke-linejoin="round"
-      stroke-dasharray="${dashArray}"
+      stroke-dasharray="${snakeLength} ${pathLength}"
       stroke-dashoffset="0"
     >
       <animate
         attributeName="stroke-dashoffset"
-        dur="${oneWayDuration}s"
-        from="0"
-        to="-${snakeLength + pathLength}"
+        dur="${totalDuration}s"
         repeatCount="indefinite"
+        keyTimes="0;0.5;1"
+        values="
+          0;
+          -${pathLength};
+          0
+        "
       />
     </path>
   `;
 
   /*
-   * 復路
+   * 頭も1つだけ。
+   *
+   * keyPoints:
+   *
+   * 0   = パスの先頭
+   * 1   = パスの末尾
+   * 0   = パスの先頭
+   *
+   * これで往復する。
    */
-  const reverseSnake = `
-    <path
-      id="snake-reverse"
-      d="${escapeAttribute(
-        reversePath
-      )}"
-      fill="none"
-      stroke="${SNAKE_COLOR}"
-      stroke-width="7"
-      stroke-linecap="round"
-      stroke-linejoin="round"
-      stroke-dasharray="${dashArray}"
-      stroke-dashoffset="0"
-      opacity="0"
-    >
-      <animate
-        attributeName="opacity"
-        dur="${oneWayDuration}s"
-        begin="${oneWayDuration}s"
-        values="0;1;1;0"
-        keyTimes="0;0.001;0.999;1"
-        repeatCount="indefinite"
-      />
-
-      <animate
-        attributeName="stroke-dashoffset"
-        dur="${oneWayDuration}s"
-        begin="${oneWayDuration}s"
-        from="0"
-        to="-${snakeLength + pathLength}"
-        repeatCount="indefinite"
-      />
-    </path>
-  `;
-
-  /*
-   * 頭
-   */
-  const forwardHead = `
+  const head = `
     <circle
       r="5"
       fill="${SNAKE_COLOR}"
     >
       <animateMotion
-        dur="${oneWayDuration}s"
-        begin="0s"
+        dur="${totalDuration}s"
         repeatCount="indefinite"
         rotate="auto"
-        path="${escapeAttribute(
-          path
-        )}"
-      />
-    </circle>
-  `;
-
-  const reverseHead = `
-    <circle
-      r="5"
-      fill="${SNAKE_COLOR}"
-      opacity="0"
-    >
-      <animate
-        attributeName="opacity"
-        dur="${oneWayDuration}s"
-        begin="${oneWayDuration}s"
-        values="0;1;1;0"
-        keyTimes="0;0.001;0.999;1"
-        repeatCount="indefinite"
-      />
-
-      <animateMotion
-        dur="${oneWayDuration}s"
-        begin="${oneWayDuration}s"
-        repeatCount="indefinite"
-        rotate="auto"
-        path="${escapeAttribute(
-          reversePath
-        )}"
+        path="${escapeAttribute(path)}"
+        keyPoints="0;1;0"
+        keyTimes="0;0.5;1"
+        calcMode="linear"
       />
     </circle>
   `;
 
   return `
-    ${forwardSnake}
-    ${reverseSnake}
-    ${forwardHead}
-    ${reverseHead}
+    ${snake}
+    ${head}
   `;
 }
 
